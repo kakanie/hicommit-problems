@@ -1,0 +1,89 @@
+name: CI
+
+on:
+    push:
+        branches:
+            - '**'
+
+jobs:
+    build:
+        if: github.ref == 'refs/heads/${{ github.event.ref }}'
+        
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v2
+
+            - name: Checkout Test Cases
+              uses: actions/checkout@v2
+              with:
+                  repository: hicommit/problems
+                  ref: test
+                  path: test-cases-repo
+
+            - name: Set up C++ Compiler and Libraries
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y g++-10 cmake git curl
+                  sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 90
+                  echo "#include <bits/stdc++.h>" > stdc++.h
+                  echo "using namespace std;" >> stdc++.h
+
+            - name: Compile Code
+              run: |
+                  g++ -o my_program main.cpp -std=c++17
+
+            - name: Run Tests
+              run: |
+                  echo "Listing test cases directory"
+                  ls -l test-cases-repo/test-cases
+                  pass_count=0
+                  total_count=0
+                  echo "Test Results:" > test_results.txt
+                  for test_dir in test-cases-repo/test-cases/*/; do
+                    echo "Processing ${test_dir}"
+                    input_file="${test_dir}input.txt"
+                    expected_output_file="${test_dir}output.txt"
+                    total_count=$((total_count + 1))
+                    
+                    if [[ -f "$input_file" ]] && [[ -f "$expected_output_file" ]]; then
+                      echo "Running test with ${input_file} and ${expected_output_file}"
+                      ./my_program < "$input_file" > output.txt
+
+                      # Add a newline at the end of both output files if not present
+                      sed -i -e '$a\' output.txt
+                      sed -i -e '$a\' "$expected_output_file"
+                      
+                      if diff -q output.txt "$expected_output_file"; then
+                        echo "Test ${test_dir} passed!"
+                        echo "Test ${test_dir} passed!" >> test_results.txt
+                        pass_count=$((pass_count + 1))
+                      else
+                        echo "Test ${test_dir} failed!"
+                        echo "Test ${test_dir} failed!" >> test_results.txt
+                        diff output.txt "$expected_output_file" >> test_results.txt
+                      fi
+                    else
+                      echo "Test case files not found in ${test_dir}"
+                      echo "Test case files not found in ${test_dir}" >> test_results.txt
+                    fi
+                  done
+
+                  echo "Total tests: $total_count, Passed: $pass_count" >> test_results.txt
+                  echo "All tests completed!"
+
+            - name: Cache dependencies
+              uses: actions/cache@v2
+              with:
+                  path: |
+                      ~/.cache
+                  key: ${{ runner.os }}-cpp-${{ hashFiles('**/*.cpp') }}
+                  restore-keys: |
+                      ${{ runner.os }}-cpp-
+
+            - name: Upload Test Results
+              uses: actions/upload-artifact@v3
+              with:
+                  name: test-results
+                  path: test_results.txt
