@@ -126,7 +126,7 @@ jobs:
               --arg run_id "${{ github.run_id }}" \
               --arg sha "${{ github.sha }}" \
               --arg status "$OVERALL_STATUS" \
-              --argjson result "$RESULTS_JSON" \
+              --arg result "$RESULTS_JSON" \
               --arg pass_count "$PASS_COUNT" \
               --arg total_count "$TOTAL_COUNT" \
               --arg duration "$DURATION" \
