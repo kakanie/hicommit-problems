@@ -28,53 +28,68 @@ jobs:
           curl -LO https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64
           chmod +x jq-linux64
           sudo mv jq-linux64 /usr/local/bin/jq
+
       - name: Compile Code
         run: |
           g++ -o my_program main.cpp -std=c++17
+
       - name: Fetch Test Cases from API
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/testcases"
           curl -s $api_url -o test_cases.json
+
       - name: Run Tests
         id: run_tests
         run: |
           pass_count=0
           total_count=0
           results="[]"
+          overall_status="passed"
+
           jq -c '.[]' test_cases.json > test_cases_list.txt
           while IFS= read -r test_case; do
             id=$(echo "$test_case" | jq -r '.id')
             input=$(echo "$test_case" | jq -r '.input')
             expected_output=$(echo "$test_case" | jq -r '.output')
+
             echo "Running test with ID: $id"
             echo "Input: $input"
             echo "Expected Output: $expected_output"
-            echo "$input" | ./my_program > output.txt
-            # Ensure there's a newline at the end of both output files
-            sed -i -e '$a\' output.txt
-            actual_output=$(cat output.txt)
-            echo "Actual Output: $actual_output"
-            if [ "$actual_output" == "$expected_output" ]; then
-              echo "Test $id passed!"
-              result_status="passed"
-              pass_count=$((pass_count + 1))
+
+            # Run the program and handle any errors
+            if ! echo "$input" | ./my_program > output.txt; then
+              echo "Test $id encountered an error!"
+              result_status="error"
+              actual_output="N/A"  # Do not record actual output if there's an error
+              overall_status="error"
             else
-              echo "Test $id failed!"
-              result_status="failed"
+              # Ensure there's a newline at the end of both output files
+              sed -i -e '$a\' output.txt
+              actual_output=$(cat output.txt)
+
+              echo "Actual Output: $actual_output"
+
+              if [ "$actual_output" == "$expected_output" ]; then
+                echo "Test $id passed!"
+                result_status="passed"
+                pass_count=$((pass_count + 1))
+              else
+                echo "Test $id failed!"
+                result_status="failed"
+                overall_status="failed"
+              fi
             fi
+
             echo "---------------------------"
-            # Append the new result to the JSON array with actual_output
+
+            # Append the new result to the JSON array
             results=$(echo "$results" | jq --arg id "$id" --arg status "$result_status" --arg actual_output "$actual_output" \
               '. += [{"id": $id, "status": $status, "actual_output": $actual_output}]')
+
             total_count=$((total_count + 1))
           done < test_cases_list.txt
-          # Determine overall status
-          if [ $pass_count -eq $total_count ]; then
-            overall_status="passed"
-          else
-            overall_status="failed"
-          fi
+
           # Log results for debugging
           echo "Results JSON: $results"
           echo "Overall Status: $overall_status"
@@ -87,6 +102,7 @@ jobs:
           echo "OVERALL_STATUS=$overall_status" >> $GITHUB_ENV
           echo "PASS_COUNT=$pass_count" >> $GITHUB_ENV
           echo "TOTAL_COUNT=$total_count" >> $GITHUB_ENV
+
       - name: Record end time and calculate duration
         id: end_time
         run: |
@@ -94,6 +110,7 @@ jobs:
           start_time=${{ env.START_TIME }}
           duration=$((end_time - start_time))
           echo "DURATION=$duration" >> $GITHUB_ENV
+
       - name: Post Test Results
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
@@ -110,9 +127,9 @@ jobs:
               --arg sha "${{ github.sha }}" \
               --arg status "$OVERALL_STATUS" \
               --argjson result "$RESULTS_JSON" \
-              --argjson pass_count "$PASS_COUNT" \
-              --argjson total_count "$TOTAL_COUNT" \
-              --argjson duration "$DURATION" \
+              --arg pass_count "$PASS_COUNT" \
+              --arg total_count "$TOTAL_COUNT" \
+              --arg duration "$DURATION" \
               --arg code "$encoded_code" \
               '{
                 problem: $branch,
@@ -121,10 +138,10 @@ jobs:
                 run_id: $run_id,
                 sha: $sha,
                 status: $status,
-                result: $result,
-                pass_count: $pass_count,
-                total_count: $total_count,
-                duration: $duration,
+                result: ($result | fromjson),
+                pass_count: ($pass_count | tonumber),
+                total_count: ($total_count | tonumber),
+                duration: ($duration | tonumber),
                 code: $code
               }')
       
