@@ -30,23 +30,23 @@ jobs:
           sudo mv jq-linux64 /usr/local/bin/jq
 
       - name: Compile Code
+        id: compile
         run: |
           g++ -o my_program main.cpp -std=c++17
-        continue-on-error: true
 
       - name: Set Compile Status
-        if: failure()
+        if: failure()  # Kiểm tra nếu bước biên dịch thất bại
         run: echo "OVERALL_STATUS=compile_error" >> $GITHUB_ENV
 
       - name: Fetch Test Cases from API
-        if: success()
+        if: success()  # Chỉ chạy nếu bước biên dịch thành công
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/testcases"
           curl -s $api_url -o test_cases.json
 
       - name: Run Tests
-        if: success()
+        if: success()  # Chỉ chạy nếu bước biên dịch thành công
         id: run_tests
         run: |
           pass_count=0
