@@ -17,22 +17,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up C++ Compiler and Libraries
+      - name: Set up Java and Utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-10 cmake git curl
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 90
-          echo "#include <bits/stdc++.h>" > stdc++.h
-          echo "using namespace std;" >> stdc++.h
+          sudo apt-get install -y openjdk-17-jdk git curl
           # Download and install jq-1.5-1
           curl -LO https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64
           chmod +x jq-linux64
           sudo mv jq-linux64 /usr/local/bin/jq
-
+          
       - name: Compile Code
         id: compile
-        run: |
-          g++ -o my_program main.cpp -std=c++17
+        run: javac Main.java
 
       - name: Handle Compile Failure
         if: failure()
@@ -45,8 +41,8 @@ jobs:
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
           
-          # Mã hóa file main.cpp thành base64
-          encoded_code=$(base64 -w 0 main.cpp)
+          # Mã hóa file Main.java thành base64
+          encoded_code=$(base64 -w 0 Main.java)
 
           json_payload=$(jq -n \
             --arg branch "$branch_name" \
@@ -101,7 +97,7 @@ jobs:
             echo "Expected Output: $expected_output"
 
             # Run the program and handle any errors
-            if ! echo "$input" | ./my_program > output.txt; then
+            if ! echo "$input" | java Main > output.txt; then
               echo "Test $id encountered an error!"
               result_status="error"
               actual_output="N/A"  # Do not record actual output if there's an error
@@ -161,8 +157,8 @@ jobs:
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
           
-          # Mã hóa file main.cpp thành base64
-          encoded_code=$(base64 -w 0 main.cpp)
+          # Mã hóa file Main.java thành base64
+          encoded_code=$(base64 -w 0 Main.java)
       
           json_payload=$(jq -n \
               --arg branch "$branch_name" \
