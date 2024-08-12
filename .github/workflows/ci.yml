@@ -30,16 +30,59 @@ jobs:
           sudo mv jq-linux64 /usr/local/bin/jq
 
       - name: Compile Code
+        id: compile
         run: |
           g++ -o my_program main.cpp -std=c++17
 
+      - name: Handle Compile Failure
+        if: failure()
+        run: |
+          end_time=$(date +%s)
+          start_time=${{ env.START_TIME }}
+          duration=$((end_time - start_time))
+          echo "DURATION=$duration" >> $GITHUB_ENV
+
+          branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
+          api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
+          
+          # Mã hóa file main.cpp thành base64
+          encoded_code=$(base64 -w 0 main.cpp)
+
+          json_payload=$(jq -n \
+            --arg branch "$branch_name" \
+            --arg actor "${{ github.actor }}" \
+            --arg job_name "${{ github.job }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg status "compile_error" \
+            --arg duration "$duration" \
+            --arg code "$encoded_code" \
+            '{
+              problem: $branch,
+              actor: $actor,
+              job_name: $job_name,
+              run_id: $run_id,
+              sha: $sha,
+              status: $status,
+              duration: ($duration | tonumber),
+              code: $code
+            }')
+
+          echo "JSON Payload: $json_payload"
+
+          curl -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload"
+
       - name: Fetch Test Cases from API
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/testcases"
           curl -s $api_url -o test_cases.json
 
       - name: Run Tests
+        if: success()
         id: run_tests
         run: |
           pass_count=0
@@ -105,6 +148,7 @@ jobs:
 
       - name: Record end time and calculate duration
         id: end_time
+        if: success()
         run: |
           end_time=$(date +%s)
           start_time=${{ env.START_TIME }}
@@ -112,6 +156,7 @@ jobs:
           echo "DURATION=$duration" >> $GITHUB_ENV
 
       - name: Post Test Results
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
