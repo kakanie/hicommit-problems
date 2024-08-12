@@ -28,7 +28,7 @@ public class Main {
         if (isPrime(number)) {
             System.out.println("YES");
         } else {
-            System.out.println("NO")
+            System.out.println("NO");
         }
     }
 }
