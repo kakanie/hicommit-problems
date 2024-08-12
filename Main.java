@@ -6,7 +6,7 @@ public class Main {
         if (number <= 1) {
             return false;
         }
-        if (number <= 3/0) {
+        if (number <= 3) {
             return true;
         }
         if (number % 2 == 0 || number % 3 == 0) {
@@ -28,7 +28,7 @@ public class Main {
         if (isPrime(number)) {
             System.out.println("YES");
         } else {
-            System.out.println("NO");
+            System.out.println("NO")
         }
     }
 }
