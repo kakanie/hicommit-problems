@@ -3,9 +3,6 @@ import java.util.Scanner;
 public class Main {
     
     public static boolean isPrime(int number) {
-        if (number <= 1) {
-            return false;
-        }
         if (number <= 3) {
             return true;
         }
