@@ -24,6 +24,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 90
           echo "#include <bits/stdc++.h>" > stdc++.h
           echo "using namespace std;" >> stdc++.h
+          # Download and install jq-1.5-1
           curl -LO https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64
           chmod +x jq-linux64
           sudo mv jq-linux64 /usr/local/bin/jq
@@ -33,19 +34,55 @@ jobs:
         run: |
           g++ -o my_program main.cpp -std=c++17
 
-      - name: Set Compile Status
-        if: failure()  # Kiểm tra nếu bước biên dịch thất bại
-        run: echo "OVERALL_STATUS=compile_error" >> $GITHUB_ENV
+      - name: Handle Compile Failure
+        if: failure()
+        run: |
+          end_time=$(date +%s)
+          start_time=${{ env.START_TIME }}
+          duration=$((end_time - start_time))
+          echo "DURATION=$duration" >> $GITHUB_ENV
+
+          branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
+          api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
+          
+          # Mã hóa file main.cpp thành base64
+          encoded_code=$(base64 -w 0 main.cpp)
+
+          json_payload=$(jq -n \
+            --arg branch "$branch_name" \
+            --arg actor "${{ github.actor }}" \
+            --arg job_name "${{ github.job }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg status "compile_error" \
+            --arg duration "$duration" \
+            --arg code "$encoded_code" \
+            '{
+              problem: $branch,
+              actor: $actor,
+              job_name: $job_name,
+              run_id: $run_id,
+              sha: $sha,
+              status: $status,
+              duration: ($duration | tonumber),
+              code: $code
+            }')
+
+          echo "JSON Payload: $json_payload"
+
+          curl -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload"
 
       - name: Fetch Test Cases from API
-        if: success()  # Chỉ chạy nếu bước biên dịch thành công
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/testcases"
           curl -s $api_url -o test_cases.json
 
       - name: Run Tests
-        if: success()  # Chỉ chạy nếu bước biên dịch thành công
+        if: success()
         id: run_tests
         run: |
           pass_count=0
@@ -63,12 +100,14 @@ jobs:
             echo "Input: $input"
             echo "Expected Output: $expected_output"
 
+            # Run the program and handle any errors
             if ! echo "$input" | ./my_program > output.txt; then
               echo "Test $id encountered an error!"
               result_status="error"
-              actual_output="N/A"
+              actual_output="N/A"  # Do not record actual output if there's an error
               overall_status="error"
             else
+              # Ensure there's a newline at the end of both output files
               sed -i -e '$a\' output.txt
               actual_output=$(cat output.txt)
 
@@ -87,12 +126,20 @@ jobs:
 
             echo "---------------------------"
 
+            # Append the new result to the JSON array
             results=$(echo "$results" | jq --arg id "$id" --arg status "$result_status" --arg actual_output "$actual_output" \
               '. += [{"id": $id, "status": $status, "actual_output": $actual_output}]')
 
             total_count=$((total_count + 1))
           done < test_cases_list.txt
 
+          # Log results for debugging
+          echo "Results JSON: $results"
+          echo "Overall Status: $overall_status"
+          echo "Total: $total_count"
+          echo "Pass Count: $pass_count"
+          
+          # Encode JSON for safe export to GitHub Actions environment
           encoded_results=$(echo "$results" | jq -c .)
           echo "RESULTS_JSON=$encoded_results" >> $GITHUB_ENV
           echo "OVERALL_STATUS=$overall_status" >> $GITHUB_ENV
@@ -101,6 +148,7 @@ jobs:
 
       - name: Record end time and calculate duration
         id: end_time
+        if: success()
         run: |
           end_time=$(date +%s)
           start_time=${{ env.START_TIME }}
@@ -108,43 +156,25 @@ jobs:
           echo "DURATION=$duration" >> $GITHUB_ENV
 
       - name: Post Test Results
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
+          
+          # Mã hóa file main.cpp thành base64
           encoded_code=$(base64 -w 0 main.cpp)
-
-          if [ "${{ env.OVERALL_STATUS }}" == "compile_error" ]; then
-            json_payload=$(jq -n \
+      
+          json_payload=$(jq -n \
               --arg branch "$branch_name" \
               --arg actor "${{ github.actor }}" \
               --arg job_name "${{ github.job }}" \
               --arg run_id "${{ github.run_id }}" \
               --arg sha "${{ github.sha }}" \
-              --arg status "${{ env.OVERALL_STATUS }}" \
-              --arg duration "${{ env.DURATION }}" \
-              --arg code "$encoded_code" \
-              '{
-                problem: $branch,
-                actor: $actor,
-                job_name: $job_name,
-                run_id: $run_id,
-                sha: $sha,
-                status: $status,
-                duration: ($duration | tonumber),
-                code: $code
-              }')
-          else
-            json_payload=$(jq -n \
-              --arg branch "$branch_name" \
-              --arg actor "${{ github.actor }}" \
-              --arg job_name "${{ github.job }}" \
-              --arg run_id "${{ github.run_id }}" \
-              --arg sha "${{ github.sha }}" \
-              --arg status "${{ env.OVERALL_STATUS }}" \
-              --arg result "${{ env.RESULTS_JSON }}" \
-              --arg pass_count "${{ env.PASS_COUNT }}" \
-              --arg total_count "${{ env.TOTAL_COUNT }}" \
-              --arg duration "${{ env.DURATION }}" \
+              --arg status "$OVERALL_STATUS" \
+              --arg result "$RESULTS_JSON" \
+              --arg pass_count "$PASS_COUNT" \
+              --arg total_count "$TOTAL_COUNT" \
+              --arg duration "$DURATION" \
               --arg code "$encoded_code" \
               '{
                 problem: $branch,
@@ -159,8 +189,15 @@ jobs:
                 duration: ($duration | tonumber),
                 code: $code
               }')
-          fi
+      
+          echo "JSON Payload: $json_payload"
           
           curl -X POST "$api_url" \
             -H "Content-Type: application/json" \
             -d "$json_payload"
+        env:
+          RESULTS_JSON: ${{ env.RESULTS_JSON }}
+          OVERALL_STATUS: ${{ env.OVERALL_STATUS }}
+          PASS_COUNT: ${{ env.PASS_COUNT }}
+          TOTAL_COUNT: ${{ env.TOTAL_COUNT }}
+          DURATION: ${{ env.DURATION }}
