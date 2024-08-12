@@ -21,74 +21,98 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc cmake git curl
-          echo "#include <stdio.h>" > stdio.h
-          echo "#include <stdlib.h>" >> stdio.h
-          echo "#include <string.h>" >> stdio.h
           # Download and install jq-1.5-1
           curl -LO https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64
           chmod +x jq-linux64
           sudo mv jq-linux64 /usr/local/bin/jq
-
       - name: Compile Code
+        id: compile
         run: |
-          gcc -o my_program main.c -std=c11
-
+          gcc -o my_program main.c -std=c99
+      - name: Handle Compile Failure
+        if: failure()
+        run: |
+          end_time=$(date +%s)
+          start_time=${{ env.START_TIME }}
+          duration=$((end_time - start_time))
+          echo "DURATION=$duration" >> $GITHUB_ENV
+          branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
+          api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
+          
+          # Mã hóa file main.c thành base64
+          encoded_code=$(base64 -w 0 main.c)
+          json_payload=$(jq -n \
+            --arg branch "$branch_name" \
+            --arg actor "${{ github.actor }}" \
+            --arg job_name "${{ github.job }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg status "compile_error" \
+            --arg duration "$duration" \
+            --arg code "$encoded_code" \
+            '{
+              problem: $branch,
+              actor: $actor,
+              job_name: $job_name,
+              run_id: $run_id,
+              sha: $sha,
+              status: $status,
+              duration: ($duration | tonumber),
+              code: $code
+            }')
+          echo "JSON Payload: $json_payload"
+          curl -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload"
       - name: Fetch Test Cases from API
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/testcases"
           curl -s $api_url -o test_cases.json
-
       - name: Run Tests
+        if: success()
         id: run_tests
         run: |
           pass_count=0
           total_count=0
           results="[]"
-
+          overall_status="passed"
           jq -c '.[]' test_cases.json > test_cases_list.txt
           while IFS= read -r test_case; do
             id=$(echo "$test_case" | jq -r '.id')
             input=$(echo "$test_case" | jq -r '.input')
             expected_output=$(echo "$test_case" | jq -r '.output')
-
             echo "Running test with ID: $id"
             echo "Input: $input"
             echo "Expected Output: $expected_output"
-
-            echo "$input" | ./my_program > output.txt
-
-            # Ensure there's a newline at the end of both output files
-            sed -i -e '$a\' output.txt
-            actual_output=$(cat output.txt)
-
-            echo "Actual Output: $actual_output"
-
-            if [ "$actual_output" == "$expected_output" ]; then
-              echo "Test $id passed!"
-              result_status="passed"
-              pass_count=$((pass_count + 1))
+            # Run the program and handle any errors
+            if ! echo "$input" | ./my_program > output.txt; then
+              echo "Test $id encountered an error!"
+              result_status="error"
+              actual_output="N/A"  # Do not record actual output if there's an error
+              overall_status="error"
             else
-              echo "Test $id failed!"
-              result_status="failed"
+              # Ensure there's a newline at the end of both output files
+              sed -i -e '$a\' output.txt
+              actual_output=$(cat output.txt)
+              echo "Actual Output: $actual_output"
+              if [ "$actual_output" == "$expected_output" ]; then
+                echo "Test $id passed!"
+                result_status="passed"
+                pass_count=$((pass_count + 1))
+              else
+                echo "Test $id failed!"
+                result_status="failed"
+                overall_status="failed"
+              fi
             fi
-
             echo "---------------------------"
-
-            # Append the new result to the JSON array with actual_output
+            # Append the new result to the JSON array
             results=$(echo "$results" | jq --arg id "$id" --arg status "$result_status" --arg actual_output "$actual_output" \
               '. += [{"id": $id, "status": $status, "actual_output": $actual_output}]')
-
             total_count=$((total_count + 1))
           done < test_cases_list.txt
-
-          # Determine overall status
-          if [ $pass_count -eq $total_count ]; then
-            overall_status="passed"
-          else
-            overall_status="failed"
-          fi
-
           # Log results for debugging
           echo "Results JSON: $results"
           echo "Overall Status: $overall_status"
@@ -101,16 +125,16 @@ jobs:
           echo "OVERALL_STATUS=$overall_status" >> $GITHUB_ENV
           echo "PASS_COUNT=$pass_count" >> $GITHUB_ENV
           echo "TOTAL_COUNT=$total_count" >> $GITHUB_ENV
-
       - name: Record end time and calculate duration
         id: end_time
+        if: success()
         run: |
           end_time=$(date +%s)
           start_time=${{ env.START_TIME }}
           duration=$((end_time - start_time))
           echo "DURATION=$duration" >> $GITHUB_ENV
-
       - name: Post Test Results
+        if: success()
         run: |
           branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
           api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
