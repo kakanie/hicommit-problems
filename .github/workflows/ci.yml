@@ -13,9 +13,40 @@ jobs:
       - name: Record start time
         id: start_time
         run: echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
-
+        
       - name: Checkout code
         uses: actions/checkout@v2
+
+      - name: Send Pending Status to API
+        run: |
+          branch_name=$(echo ${{ github.ref }} | sed 's|refs/heads/||')
+          api_url="https://proxy.kakanie.com/problems/$branch_name/submission/result"
+          
+          # Mã hóa file Main.java thành base64
+          encoded_code=$(base64 -w 0 main.c)
+          
+          json_payload=$(jq -n \
+              --arg branch "$branch_name" \
+              --arg actor "${{ github.actor }}" \
+              --arg job_name "${{ github.job }}" \
+              --arg run_id "${{ github.run_id }}" \
+              --arg sha "${{ github.sha }}" \
+              --arg status "pending" \
+              --arg code "$encoded_code" \
+              '{
+                problem: $branch,
+                actor: $actor,
+                job_name: $job_name,
+                run_id: $run_id,
+                sha: $sha,
+                status: $status,
+                code: $code
+              }')
+          echo "JSON Payload: $json_payload"
+          
+          curl -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload"
 
       - name: Set up C Compiler and Libraries
         run: |
