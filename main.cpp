@@ -15,7 +15,7 @@ int main() {
         n /= 10;
     }
 
-    cout << sum << endl
+    cout << sum << endl;
 
     return 0;
 }
